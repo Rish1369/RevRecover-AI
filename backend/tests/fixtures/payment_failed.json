@@ -1,0 +1,41 @@
+{
+  "entity": "event",
+  "account_id": "acc_test_merchant",
+  "event": "payment.failed",
+  "contains": ["payment"],
+  "payload": {
+    "payment": {
+      "entity": {
+        "id": "pay_test_failed_001",
+        "entity": "payment",
+        "amount": 50000,
+        "currency": "INR",
+        "status": "failed",
+        "order_id": "order_test_001",
+        "invoice_id": null,
+        "international": false,
+        "method": "card",
+        "amount_refunded": 0,
+        "amount_transferred": 0,
+        "refund_status": null,
+        "captured": false,
+        "description": "Test payment",
+        "card_id": "card_test_001",
+        "bank": null,
+        "wallet": null,
+        "vpa": null,
+        "email": "test.customer@example.com",
+        "contact": "+919999999999",
+        "customer_id": "cust_test_placeholder",
+        "error_code": "BAD_REQUEST_ERROR",
+        "error_description": "Payment failed due to insufficient funds",
+        "error_source": "customer",
+        "error_step": "payment_authorization",
+        "error_reason": "insufficient_funds",
+        "created_at": 1726000000,
+        "notes": {}
+      }
+    }
+  },
+  "created_at": 1726000000
+}

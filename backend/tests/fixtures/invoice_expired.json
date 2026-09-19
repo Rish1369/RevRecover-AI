@@ -1,0 +1,28 @@
+{
+  "entity": "event",
+  "account_id": "acc_test_merchant",
+  "event": "invoice.expired",
+  "contains": ["invoice"],
+  "payload": {
+    "invoice": {
+      "entity": {
+        "id": "inv_test_expired_001",
+        "entity": "invoice",
+        "type": "invoice",
+        "status": "expired",
+        "amount": 250000,
+        "amount_paid": 0,
+        "due_date": 1725000000,
+        "customer_id": "cust_test_placeholder",
+        "customer_details": {
+          "name": "Test Customer",
+          "email": "test.customer@example.com",
+          "contact": "+919999999999"
+        },
+        "description": "Monthly subscription invoice",
+        "created_at": 1724800000
+      }
+    }
+  },
+  "created_at": 1726000100
+}

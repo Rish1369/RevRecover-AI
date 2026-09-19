@@ -1,0 +1,26 @@
+{
+  "entity": "event",
+  "account_id": "acc_test_merchant",
+  "event": "payment.captured",
+  "contains": ["payment"],
+  "payload": {
+    "payment": {
+      "entity": {
+        "id": "pay_test_captured_001",
+        "entity": "payment",
+        "amount": 50000,
+        "currency": "INR",
+        "status": "captured",
+        "order_id": "order_test_001",
+        "method": "card",
+        "captured": true,
+        "email": "test.customer@example.com",
+        "contact": "+919999999999",
+        "customer_id": "cust_test_placeholder",
+        "created_at": 1726003600,
+        "notes": {}
+      }
+    }
+  },
+  "created_at": 1726003600
+}
