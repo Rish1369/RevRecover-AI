@@ -7,10 +7,23 @@ import { api, type RecoveryMetrics } from '../api/client'
 
 const MERCHANT_ID = import.meta.env.VITE_MERCHANT_ID || ''
 
-const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#06b6d4', '#a78bfa']
+const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#06b6d4', '#a78bfa', '#fb923c']
 
 function paise(v: number) {
-  return `₹${(v / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+  return `â‚¹${(v / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+}
+
+function MetricTile({
+  label, value, sub, color, icon,
+}: { label: string; value: string | number; sub: string; color: string; icon: string }) {
+  return (
+    <div className="metric-tile" style={{ '--accent-color': color } as React.CSSProperties}>
+      <div style={{ fontSize: 22, marginBottom: 10 }}>{icon}</div>
+      <div className="metric-tile-label">{label}</div>
+      <div className="metric-tile-value" style={{ color }}>{value}</div>
+      <div className="metric-tile-sub">{sub}</div>
+    </div>
+  )
 }
 
 export default function Dashboard() {
@@ -29,9 +42,17 @@ export default function Dashboard() {
   if (!MERCHANT_ID) {
     return (
       <div className="page">
-        <div className="page-header">
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">Set VITE_MERCHANT_ID in your .env to load data.</p>
+        <div className="hero-banner">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <span style={{ fontSize: 28 }}>âš¡</span>
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary)' }}>RevRecover AI</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Autonomous Revenue Recovery Agent</div>
+            </div>
+          </div>
+          <p style={{ color: 'var(--accent-amber)', fontSize: 13, fontWeight: 500 }}>
+            âš  Set <code style={{ background: 'rgba(245,158,11,0.1)', padding: '1px 6px', borderRadius: 4, fontFamily: 'monospace' }}>VITE_MERCHANT_ID</code> in your <code style={{ fontFamily: 'monospace' }}>.env</code> to load live data.
+          </p>
         </div>
       </div>
     )
@@ -39,83 +60,95 @@ export default function Dashboard() {
 
   return (
     <div className="page">
-      <div className="page-header flex-center" style={{ justifyContent: 'space-between' }}>
+      {/* Header */}
+      <div className="page-header flex-between mb-8">
         <div>
           <h1 className="page-title">Recovery Dashboard</h1>
-          <p className="page-subtitle">Revenue attribution & intervention metrics</p>
+          <p className="page-subtitle">AI-powered revenue attribution &amp; intervention analytics</p>
         </div>
-        <select
-          className="input"
-          style={{ width: 140 }}
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
-        >
-          <option value={7}>Last 7 days</option>
-          <option value={30}>Last 30 days</option>
-          <option value={90}>Last 90 days</option>
-        </select>
+        <div className="flex-center gap-3">
+          <div className="flex-center gap-2" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-emerald)', boxShadow: '0 0 6px var(--accent-emerald)', animation: 'pulse-dot 2s infinite' }} />
+            Groq Â· Llama 3.3 live
+          </div>
+          <select
+            className="input"
+            style={{ width: 150 }}
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+          >
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+            <option value={90}>Last 90 days</option>
+          </select>
+        </div>
       </div>
 
-      {loading && <div className="spinner" style={{ margin: '60px auto' }} />}
+      {loading && <div className="spinner" style={{ margin: '80px auto' }} />}
 
       {metrics && (
         <>
-          {/* ── Headline metrics ── */}
+          {/* â”€â”€ Headline metrics â”€â”€ */}
           <div className="metrics-grid">
-            <div className="metric-tile" style={{ '--accent-color': 'var(--accent-emerald)' } as React.CSSProperties}>
-              <div className="metric-tile-label">Recovered</div>
-              <div className="metric-tile-value glow-emerald">{paise(metrics.total_recovered_paise)}</div>
-              <div className="metric-tile-sub">{metrics.recovered_cases} cases closed</div>
-            </div>
-            <div className="metric-tile" style={{ '--accent-color': 'var(--accent-indigo)' } as React.CSSProperties}>
-              <div className="metric-tile-label">Recovery Rate</div>
-              <div className="metric-tile-value" style={{ color: 'var(--accent-indigo-light)' }}>
-                {metrics.recovery_rate_pct}%
-              </div>
-              <div className="metric-tile-sub">{metrics.total_cases} total cases</div>
-            </div>
-            <div className="metric-tile" style={{ '--accent-color': '#a78bfa' } as React.CSSProperties}>
-              <div className="metric-tile-label">Avg Recovery Time</div>
-              <div className="metric-tile-value" style={{ color: '#a78bfa' }}>
-                {metrics.avg_recovery_days != null ? `${metrics.avg_recovery_days}d` : '—'}
-              </div>
-              <div className="metric-tile-sub">attribution window 7d</div>
-            </div>
-            <div className="metric-tile" style={{ '--accent-color': 'var(--accent-amber)' } as React.CSSProperties}>
-              <div className="metric-tile-label">Monitoring</div>
-              <div className="metric-tile-value" style={{ color: 'var(--accent-amber)' }}>
-                {metrics.monitoring_cases}
-              </div>
-              <div className="metric-tile-sub">awaiting attribution</div>
-            </div>
-            <div className="metric-tile" style={{ '--accent-color': 'var(--accent-rose)' } as React.CSSProperties}>
-              <div className="metric-tile-label">Escalated</div>
-              <div className="metric-tile-value" style={{ color: 'var(--accent-rose)' }}>
-                {metrics.escalated_cases}
-              </div>
-              <div className="metric-tile-sub">needs human review</div>
-            </div>
+            <MetricTile
+              label="Revenue Recovered"
+              value={paise(metrics.total_recovered_paise)}
+              sub={`${metrics.recovered_cases} cases closed`}
+              color="var(--accent-emerald)"
+              icon="ðŸ’°"
+            />
+            <MetricTile
+              label="Recovery Rate"
+              value={`${metrics.recovery_rate_pct}%`}
+              sub={`${metrics.total_cases} total cases`}
+              color="var(--accent-indigo-light)"
+              icon="ðŸ“ˆ"
+            />
+            <MetricTile
+              label="Avg Recovery Time"
+              value={metrics.avg_recovery_days != null ? `${metrics.avg_recovery_days}d` : 'â€”'}
+              sub="attribution window 7d"
+              color="var(--accent-violet)"
+              icon="â±"
+            />
+            <MetricTile
+              label="Monitoring"
+              value={metrics.monitoring_cases}
+              sub="awaiting attribution"
+              color="var(--accent-amber)"
+              icon="ðŸ‘"
+            />
+            <MetricTile
+              label="Escalated"
+              value={metrics.escalated_cases}
+              sub="needs human review"
+              color="var(--accent-rose)"
+              icon="ðŸš¨"
+            />
           </div>
 
-          {/* ── Charts ── */}
+          {/* â”€â”€ Charts â”€â”€ */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
             {/* Recovery by diagnosis */}
             <div className="card">
               <div className="card-header">
-                <span style={{ fontSize: 14, fontWeight: 600 }}>Recovery by Diagnosis</span>
+                <div>
+                  <div className="card-title">Recovery by Diagnosis</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Cases recovered vs total</div>
+                </div>
               </div>
               <div className="card-body">
                 <div className="chart-container">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={metrics.by_diagnosis} layout="vertical" margin={{ left: 12 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(99,102,241,0.1)" horizontal={false} />
-                      <XAxis type="number" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                      <YAxis type="category" dataKey="diagnosis_code" tick={{ fontSize: 10, fill: '#94a3b8' }} width={140} tickLine={false} axisLine={false} />
+                    <BarChart data={metrics.by_diagnosis} layout="vertical" margin={{ left: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(99,102,241,0.08)" horizontal={false} />
+                      <XAxis type="number" tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} />
+                      <YAxis type="category" dataKey="diagnosis_code" tick={{ fontSize: 9.5, fill: '#475569' }} width={150} tickLine={false} axisLine={false} />
                       <Tooltip
-                        contentStyle={{ background: '#0d1220', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: 12 }}
+                        contentStyle={{ background: '#0b0f1c', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 10, fontSize: 12 }}
                         formatter={(val, name) => [val, name === 'recovered' ? 'Recovered' : 'Total']}
                       />
-                      <Bar dataKey="total" fill="rgba(99,102,241,0.3)" radius={[0, 4, 4, 0]} />
+                      <Bar dataKey="total" fill="rgba(99,102,241,0.2)" radius={[0, 4, 4, 0]} />
                       <Bar dataKey="recovered" fill="#10b981" radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -126,7 +159,10 @@ export default function Dashboard() {
             {/* Interventions by tool */}
             <div className="card">
               <div className="card-header">
-                <span style={{ fontSize: 14, fontWeight: 600 }}>Interventions by Tool</span>
+                <div>
+                  <div className="card-title">Interventions by Tool</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Agent action distribution</div>
+                </div>
               </div>
               <div className="card-body">
                 <div className="chart-container">
@@ -138,11 +174,11 @@ export default function Dashboard() {
                         nameKey="tool"
                         cx="50%"
                         cy="50%"
-                        outerRadius={90}
-                        innerRadius={50}
+                        outerRadius={95}
+                        innerRadius={52}
                         paddingAngle={3}
                         label={({ tool, percent }) =>
-                          `${tool.replace(/_/g, ' ')} ${(percent * 100).toFixed(0)}%`
+                          percent > 0.05 ? `${tool.replace(/_/g, ' ')} ${(percent * 100).toFixed(0)}%` : ''
                         }
                         labelLine={false}
                       >
@@ -151,7 +187,8 @@ export default function Dashboard() {
                         ))}
                       </Pie>
                       <Tooltip
-                        contentStyle={{ background: '#0d1220', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: 12 }}
+                        contentStyle={{ background: '#0b0f1c', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 10, fontSize: 12 }}
+                        formatter={(val: number, name: string) => [val, name.replace(/_/g, ' ')]}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -160,10 +197,14 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* ── Diagnosis breakdown table ── */}
+          {/* â”€â”€ Diagnosis breakdown table â”€â”€ */}
           <div className="card">
-            <div className="card-header" style={{ paddingBottom: 16 }}>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>Diagnosis Breakdown</span>
+            <div className="card-header">
+              <div>
+                <div className="card-title">Diagnosis Breakdown</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Performance by failure reason</div>
+              </div>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{metrics.by_diagnosis.length} categories</span>
             </div>
             <div className="table-wrap">
               <table>
@@ -177,23 +218,27 @@ export default function Dashboard() {
                 </thead>
                 <tbody>
                   {metrics.by_diagnosis.map((row) => (
-                    <tr key={row.diagnosis_code}>
-                      <td><span className="font-mono">{row.diagnosis_code}</span></td>
-                      <td>{row.total}</td>
-                      <td className="text-emerald">{row.recovered}</td>
+                    <tr key={row.diagnosis_code} style={{ cursor: 'default' }}>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div style={{
-                            width: 60, height: 4, background: 'rgba(99,102,241,0.2)',
-                            borderRadius: 2, overflow: 'hidden',
-                          }}>
-                            <div style={{
-                              width: `${row.recovery_rate_pct}%`, height: '100%',
-                              background: row.recovery_rate_pct > 50 ? '#10b981' : '#6366f1',
-                              borderRadius: 2,
+                        <span className="font-mono" style={{ color: 'var(--accent-cyan)' }}>
+                          {row.diagnosis_code}
+                        </span>
+                      </td>
+                      <td>{row.total}</td>
+                      <td className="text-emerald" style={{ fontWeight: 600 }}>{row.recovered}</td>
+                      <td>
+                        <div className="flex-center gap-3">
+                          <div className="progress-bar-bg">
+                            <div className="progress-bar-fill" style={{
+                              width: `${row.recovery_rate_pct}%`,
+                              background: row.recovery_rate_pct > 50
+                                ? 'linear-gradient(90deg,#10b981,#34d399)'
+                                : 'linear-gradient(90deg,#6366f1,#818cf8)',
                             }} />
                           </div>
-                          <span style={{ fontSize: 12 }}>{row.recovery_rate_pct}%</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', minWidth: 32 }}>
+                            {row.recovery_rate_pct}%
+                          </span>
                         </div>
                       </td>
                     </tr>

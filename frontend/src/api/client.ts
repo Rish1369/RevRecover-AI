@@ -74,6 +74,25 @@ export interface RecoveryMetrics {
   by_tool: Array<{ tool: string; count: number }>
 }
 
+// ── Razorpay Checkout ────────────────────────────────────────────────────────
+
+export interface CreateOrderResponse {
+  order_id: string
+  amount: number
+  currency: string
+}
+
+export interface VerifyPaymentRequest {
+  razorpay_order_id: string
+  razorpay_payment_id: string
+  razorpay_signature: string
+}
+
+export interface VerifyPaymentResponse {
+  success: boolean
+  payment_id: string
+}
+
 export const api = {
   cases: {
     list: (merchantId: string, params?: { status?: string; source_type?: string }) => {
@@ -107,5 +126,17 @@ export const api = {
   metrics: {
     recovery: (merchantId: string, days = 30) =>
       req<RecoveryMetrics>(`/metrics/recovery?merchant_id=${merchantId}&days=${days}`),
+  },
+  payments: {
+    createOrder: (amount: number, currency = 'INR') =>
+      req<CreateOrderResponse>('/payments/create-order', {
+        method: 'POST',
+        body: JSON.stringify({ amount, currency }),
+      }),
+    verifyPayment: (payload: VerifyPaymentRequest) =>
+      req<VerifyPaymentResponse>('/payments/verify-payment', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
   },
 }

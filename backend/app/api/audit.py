@@ -35,7 +35,7 @@ async def list_audit_log(
     session: AsyncSession = Depends(get_db),
 ):
     await session.execute(
-        text("SET LOCAL app.current_merchant_id = :mid"), {"mid": str(merchant_id)}
+        text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'")
     )
     result = await session.execute(
         select(AuditLog)
@@ -55,7 +55,7 @@ async def verify_audit_chain(
     """Verify the integrity of the audit log hash chain."""
     from app.services.audit import verify_chain
     await session.execute(
-        text("SET LOCAL app.current_merchant_id = :mid"), {"mid": str(merchant_id)}
+        text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'")
     )
     ok, message = await verify_chain(session, merchant_id)
     return {"chain_valid": ok, "message": message}

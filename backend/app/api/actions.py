@@ -37,7 +37,7 @@ async def list_actions_for_case(
     session: AsyncSession = Depends(get_db),
 ):
     await session.execute(
-        text("SET LOCAL app.current_merchant_id = :mid"), {"mid": str(merchant_id)}
+        text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'")
     )
     result = await session.execute(
         select(AgentAction)

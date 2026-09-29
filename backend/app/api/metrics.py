@@ -39,7 +39,7 @@ async def get_recovery_metrics(
     session: AsyncSession = Depends(get_db),
 ):
     await session.execute(
-        text("SET LOCAL app.current_merchant_id = :mid"), {"mid": str(merchant_id)}
+        text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'")
     )
     since = datetime.now(timezone.utc) - timedelta(days=days)
 

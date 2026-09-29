@@ -16,7 +16,7 @@ from app.core.db import get_db_session
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+@celery_app.task(bind=True, max_retries=10, default_retry_delay=60, rate_limit='1/m')
 def run_agent_for_case(self, merchant_id: str, risk_case_id: str):
     """
     Run the agent loop for a single risk case.

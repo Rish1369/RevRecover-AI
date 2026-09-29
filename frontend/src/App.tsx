@@ -5,6 +5,7 @@ import Cases from './pages/Cases'
 import CaseDetail from './pages/CaseDetail'
 import Policies from './pages/Policies'
 import AuditPage from './pages/Audit'
+import Checkout from './pages/Checkout'
 import './index.css'
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
             <Route path="/cases/:caseId" element={<CaseDetail />} />
             <Route path="/policies" element={<Policies />} />
             <Route path="/audit" element={<AuditPage />} />
+            <Route path="/checkout" element={<Checkout />} />
           </Routes>
         </main>
       </div>

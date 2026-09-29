@@ -22,12 +22,12 @@ from app.core.settings import get_settings
 
 settings = get_settings()
 
+from sqlalchemy.pool import NullPool
+
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    poolclass=NullPool,
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -52,9 +52,10 @@ async def get_db(merchant_id: uuid.UUID | None = None) -> AsyncGenerator[AsyncSe
     """
     async with AsyncSessionLocal() as session:
         if merchant_id:
+            # SET is DDL — PostgreSQL does not support bind params here.
+            # UUIDs are safe to interpolate (only hex + hyphens).
             await session.execute(
-                text("SET LOCAL app.current_merchant_id = :mid"),
-                {"mid": str(merchant_id)},
+                text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'")
             )
         try:
             yield session
@@ -75,8 +76,7 @@ async def get_db_session(merchant_id: uuid.UUID | None = None) -> AsyncGenerator
     async with AsyncSessionLocal() as session:
         if merchant_id:
             await session.execute(
-                text("SET LOCAL app.current_merchant_id = :mid"),
-                {"mid": str(merchant_id)},
+                text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'")
             )
         try:
             yield session

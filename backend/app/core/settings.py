@@ -15,8 +15,13 @@ class Settings(BaseSettings):
     # ── Security ──────────────────────────────────────────────────────────────
     SECRET_KEY: str = "dev-secret-change-in-production"
 
-    # ── Anthropic ─────────────────────────────────────────────────────────────
-    ANTHROPIC_API_KEY: str = ""
+    # ── Groq AI ─────────────────────────────────────────────────────────────
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+
+    # ── Razorpay Standard Checkout ─────────────────────────────────────────────
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
 
     # ── Razorpay seed values (test merchant) ──────────────────────────────────
     SEED_RAZORPAY_KEY_ID: str = "rzp_test_placeholder"

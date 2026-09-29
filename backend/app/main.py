@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.settings import get_settings
 from app.core.db import engine, Base
-from app.api import webhooks, cases, actions, policies, metrics, audit
+from app.api import webhooks, cases, actions, policies, metrics, audit, payments
 
 settings = get_settings()
 
@@ -44,6 +44,7 @@ app.include_router(actions.router)
 app.include_router(policies.router)
 app.include_router(metrics.router)
 app.include_router(audit.router)
+app.include_router(payments.router)
 
 
 @app.get("/health")

@@ -46,7 +46,7 @@ async def list_cases(
     """List risk cases for a merchant, with optional status/source_type filter."""
     from sqlalchemy import text
     await session.execute(
-        text("SET LOCAL app.current_merchant_id = :mid"), {"mid": str(merchant_id)}
+        text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'")
     )
 
     q = (
@@ -94,7 +94,7 @@ async def get_case(
 ):
     from sqlalchemy import text
     await session.execute(
-        text("SET LOCAL app.current_merchant_id = :mid"), {"mid": str(merchant_id)}
+        text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'")
     )
     result = await session.execute(
         select(RiskCase, Customer)
@@ -134,7 +134,7 @@ async def escalate_case(
     from app.services.audit import append_audit
 
     await session.execute(
-        text("SET LOCAL app.current_merchant_id = :mid"), {"mid": str(merchant_id)}
+        text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'")
     )
     result = await session.execute(
         select(RiskCase).where(RiskCase.id == case_id, RiskCase.merchant_id == merchant_id)

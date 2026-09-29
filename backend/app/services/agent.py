@@ -1,10 +1,10 @@
 """
-Claude-powered agent loop.
+Groq-powered agent loop (replaces Gemini).
 
 Flow:
-  1. Build system prompt with merchant guardrails injected explicitly
-  2. Call Claude with the risk case, diagnosis, customer history, and tool definitions
-  3. Receive a tool_use block
+  1. Build system prompt with merchant guardrails
+  2. Call Groq (llama-3.3-70b-versatile) with JSON-mode for structured tool selection
+  3. Parse the tool + args from the JSON response
   4. Run through the policy engine
   5. If approved → execute against Razorpay → log AgentAction (executed)
   6. If denied   → log AgentAction (denied/skipped_dnc/escalated) → force escalate_to_human
@@ -14,12 +14,14 @@ Flow:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
-import anthropic
+from groq import Groq, RateLimitError, APIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -36,128 +38,107 @@ from app.services import razorpay_client as rzp
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-_anthropic = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+# ── Groq client (synchronous SDK; we run it in an executor) ───────────────────
+_client = Groq(api_key=settings.GROQ_API_KEY)
+MODEL = settings.GROQ_MODEL  # default: "llama-3.3-70b-versatile"
 
-MODEL = "claude-sonnet-4-5"
-
-# ── Tool definitions sent to Claude ──────────────────────────────────────────
-
-TOOL_DEFINITIONS = [
-    {
-        "name": "create_payment_link",
-        "description": "Create a Razorpay payment link and send it to the customer. Use for insufficient_funds, technical_error, or price_hesitation.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "amount_paise": {"type": "integer", "description": "Amount in paise (₹1 = 100 paise)"},
-                "description": {"type": "string"},
-                "notify_email": {"type": "boolean"},
-                "notify_sms": {"type": "boolean"},
-            },
-            "required": ["amount_paise"],
-        },
-    },
-    {
-        "name": "send_recovery_email",
-        "description": "Send a recovery email to the customer. Allowed for all diagnosis codes.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "subject": {"type": "string"},
-                "body_summary": {"type": "string", "description": "Summary of the email body"},
-            },
-            "required": ["subject", "body_summary"],
-        },
-    },
-    {
-        "name": "send_recovery_sms",
-        "description": "Send a recovery SMS. Subject to DNC and contact hours policy.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "message": {"type": "string", "maxLength": 160},
-            },
-            "required": ["message"],
-        },
-    },
-    {
-        "name": "offer_discount_link",
-        "description": "Create a discounted payment link. Only for price_hesitation diagnosis.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "original_amount_paise": {"type": "integer"},
-                "discount_pct": {"type": "number", "description": "Discount percentage e.g. 10 for 10%"},
-            },
-            "required": ["original_amount_paise", "discount_pct"],
-        },
-    },
-    {
-        "name": "resend_invoice",
-        "description": "Resend invoice via Razorpay. Only for early_overdue diagnosis.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "razorpay_invoice_id": {"type": "string"},
-            },
-            "required": ["razorpay_invoice_id"],
-        },
-    },
-    {
-        "name": "offer_payment_plan",
-        "description": "Propose a payment plan. Only for chronic_late_payer. ALWAYS requires human approval — will be escalated.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "plan_summary": {"type": "string"},
-                "installments": {"type": "integer"},
-            },
-            "required": ["plan_summary"],
-        },
-    },
-    {
-        "name": "send_mandate_update_link",
-        "description": "Send a UPI/NACH mandate update link. Only for mandate_expired.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "subscription_id": {"type": "string"},
-            },
-            "required": ["subscription_id"],
-        },
-    },
-    {
-        "name": "log_promise_to_pay",
-        "description": "Record a customer's promise to pay by a specific date.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "promised_date": {"type": "string", "format": "date"},
-                "promised_amount_paise": {"type": "integer"},
-            },
-            "required": ["promised_date", "promised_amount_paise"],
-        },
-    },
-    {
-        "name": "escalate_to_human",
-        "description": "Hand off this case to the human review queue. Always available.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "reason": {"type": "string"},
-            },
-            "required": ["reason"],
-        },
-    },
+# ── Allowed tool names ─────────────────────────────────────────────────────────
+ALLOWED_TOOLS = [
+    "create_payment_link",
+    "send_recovery_email",
+    "send_recovery_sms",
+    "offer_discount_link",
+    "resend_invoice",
+    "offer_payment_plan",
+    "send_mandate_update_link",
+    "log_promise_to_pay",
+    "escalate_to_human",
 ]
+
+# ── Tool schemas injected into the system prompt ──────────────────────────────
+TOOL_SCHEMAS = {
+    "create_payment_link": {
+        "description": "Create a Razorpay payment link and send it to the customer. Use for insufficient_funds, technical_error, or price_hesitation.",
+        "required": ["amount_paise"],
+        "properties": {
+            "amount_paise": "integer – Amount in paise (₹1 = 100 paise)",
+            "description": "string – optional description",
+            "notify_email": "boolean",
+            "notify_sms": "boolean",
+        },
+    },
+    "send_recovery_email": {
+        "description": "Send a recovery email to the customer. Allowed for all diagnosis codes.",
+        "required": ["subject", "body_summary"],
+        "properties": {
+            "subject": "string",
+            "body_summary": "string – Summary of the email body",
+        },
+    },
+    "send_recovery_sms": {
+        "description": "Send a recovery SMS. Subject to DNC and contact hours policy.",
+        "required": ["message"],
+        "properties": {"message": "string – max 160 chars"},
+    },
+    "offer_discount_link": {
+        "description": "Create a discounted payment link. Only for price_hesitation diagnosis.",
+        "required": ["original_amount_paise", "discount_pct"],
+        "properties": {
+            "original_amount_paise": "integer",
+            "discount_pct": "number – e.g. 10 for 10%",
+        },
+    },
+    "resend_invoice": {
+        "description": "Resend invoice via Razorpay. Only for early_overdue diagnosis.",
+        "required": ["razorpay_invoice_id"],
+        "properties": {"razorpay_invoice_id": "string"},
+    },
+    "offer_payment_plan": {
+        "description": "Propose a payment plan. Only for chronic_late_payer. ALWAYS requires human approval.",
+        "required": ["plan_summary"],
+        "properties": {
+            "plan_summary": "string",
+            "installments": "integer – optional",
+        },
+    },
+    "send_mandate_update_link": {
+        "description": "Send a UPI/NACH mandate update link. Only for mandate_expired.",
+        "required": ["subscription_id"],
+        "properties": {"subscription_id": "string"},
+    },
+    "log_promise_to_pay": {
+        "description": "Record a customer's promise to pay by a specific date.",
+        "required": ["promised_date", "promised_amount_paise"],
+        "properties": {
+            "promised_date": "string – YYYY-MM-DD",
+            "promised_amount_paise": "integer",
+        },
+    },
+    "escalate_to_human": {
+        "description": "Hand off this case to the human review queue. Always available.",
+        "required": ["reason"],
+        "properties": {"reason": "string"},
+    },
+}
 
 
 def _build_system_prompt(merchant: Merchant, policies: dict) -> str:
+    tool_doc = "\n".join(
+        f"  - {name}: {meta['description']}  Required fields: {meta['required']}"
+        for name, meta in TOOL_SCHEMAS.items()
+    )
     return f"""You are a revenue recovery agent for {merchant.name}.
 
-Your job is to choose ONE action from the tool list to recover a failed payment or at-risk case.
-Every proposed action will be checked against merchant guardrails BEFORE execution — you do not need
-to re-check policies yourself, but you must stay within the spirit of the following rules:
+Your ONLY job: choose ONE tool call from the list below to recover a failed payment or at-risk case.
+Respond with ONLY valid JSON in this exact shape — no markdown, no prose, no extra keys:
+{{
+  "tool": "<tool_name>",
+  "args": {{<key>: <value>, ...}},
+  "reasoning": "<one sentence explaining the choice>"
+}}
+
+AVAILABLE TOOLS:
+{tool_doc}
 
 MERCHANT GUARDRAILS:
 - Max actions per case: {policies.get('max_actions_per_case', 3)}
@@ -168,26 +149,26 @@ MERCHANT GUARDRAILS:
 - Mandate compliance: never trigger immediate re-charge; only notify-and-wait
 
 DIAGNOSIS PLAYBOOK (tools allowed per diagnosis):
-- insufficient_funds:   create_payment_link, send_recovery_email, send_recovery_sms
-- card_expired:         send_recovery_email, send_recovery_sms
-- bank_declined:        create_payment_link, send_recovery_email
-- technical_error:      create_payment_link, send_recovery_email
-- customer_cancelled:   send_recovery_email, log_promise_to_pay, escalate_to_human
-- price_hesitation:     offer_discount_link, create_payment_link, send_recovery_email
-- payment_method_friction: create_payment_link, send_recovery_sms
-- repeat_abandoner:     send_recovery_email, log_promise_to_pay
-- first_time_failure:   create_payment_link, send_recovery_email
-- recurring_failure:    send_recovery_email, offer_payment_plan
-- mandate_expired:      send_mandate_update_link
-- early_overdue:        resend_invoice, send_recovery_email
-- chronic_late_payer:   offer_payment_plan, escalate_to_human
-- disputed_likely:      escalate_to_human
+- insufficient_funds:       create_payment_link, send_recovery_email, send_recovery_sms
+- card_expired:             send_recovery_email, send_recovery_sms
+- bank_declined:            create_payment_link, send_recovery_email
+- technical_error:          create_payment_link, send_recovery_email
+- customer_cancelled:       send_recovery_email, log_promise_to_pay, escalate_to_human
+- price_hesitation:         offer_discount_link, create_payment_link, send_recovery_email
+- payment_method_friction:  create_payment_link, send_recovery_sms
+- repeat_abandoner:         send_recovery_email, log_promise_to_pay
+- first_time_failure:       create_payment_link, send_recovery_email
+- recurring_failure:        send_recovery_email, offer_payment_plan
+- mandate_expired:          send_mandate_update_link
+- early_overdue:            resend_invoice, send_recovery_email
+- chronic_late_payer:       offer_payment_plan, escalate_to_human
+- disputed_likely:          escalate_to_human
 
 RULES:
 1. Always pick the LEAST intrusive effective action first.
 2. If the diagnosis is ambiguous or no tool seems right, call escalate_to_human.
-3. Do NOT call more than one tool per response — choose the single best action.
-4. Be concise in your reasoning; it will be stored in the audit trail.
+3. Do NOT call more than one tool — choose the single best action.
+4. Your response MUST be valid JSON only — no markdown fences, no extra text.
 """
 
 
@@ -215,8 +196,8 @@ async def _update_usage(
         select(Usage).where(Usage.merchant_id == merchant_id, Usage.date == today)
     )
     usage = result.scalar_one_or_none()
-    # Rough cost estimate: claude-sonnet ≈ $3/M input, $15/M output
-    cost = (input_tokens / 1_000_000) * 3.0 + (output_tokens / 1_000_000) * 15.0
+    # Groq llama-3.3-70b-versatile pricing: ~$0.59/M input, $0.79/M output
+    cost = (input_tokens / 1_000_000) * 0.59 + (output_tokens / 1_000_000) * 0.79
     total_tokens = input_tokens + output_tokens
     if usage:
         usage.agent_calls += 1
@@ -276,8 +257,11 @@ async def _execute_tool(
         )
 
     elif tool_name in {"send_recovery_email", "send_recovery_sms"}:
-        # In Phase 1 we log the intended message; email/SMS gateway integration in Phase 2
-        logger.info("MOCK %s | merchant=%s | customer=%s | payload=%s", tool_name, merchant.id, customer and customer.id, tool_input)
+        # Phase 1: log intent; real gateway in Phase 2
+        logger.info(
+            "MOCK %s | merchant=%s | customer=%s | payload=%s",
+            tool_name, merchant.id, customer and customer.id, tool_input,
+        )
         return {"status": "queued", "channel": tool_name, "payload": tool_input}
 
     elif tool_name == "log_promise_to_pay":
@@ -288,6 +272,82 @@ async def _execute_tool(
 
     else:
         raise ValueError(f"Unknown tool: {tool_name}")
+
+
+def _call_groq_sync(
+    system_prompt: str,
+    user_message: str,
+    max_retries: int = 5,
+    initial_delay: float = 8.0,
+) -> tuple[str, int, int]:
+    """
+    Synchronous Groq call with exponential backoff on rate-limit errors.
+    Returns (raw_json_text, input_tokens, output_tokens).
+    """
+    delay = initial_delay
+    for attempt in range(max_retries):
+        try:
+            response = _client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.1,
+                max_tokens=512,
+                response_format={"type": "json_object"},
+            )
+            text = response.choices[0].message.content or ""
+            input_tokens = response.usage.prompt_tokens if response.usage else 0
+            output_tokens = response.usage.completion_tokens if response.usage else 0
+            return text, input_tokens, output_tokens
+
+        except RateLimitError as exc:
+            if attempt == max_retries - 1:
+                logger.error("Groq rate limit max retries (%d) exhausted.", max_retries)
+                raise exc
+            logger.warning(
+                "Groq 429 rate limit hit (attempt %d/%d). Sleeping %.1fs...",
+                attempt + 1, max_retries, delay,
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, 120)  # cap at 2 minutes
+
+        except APIError as exc:
+            logger.error("Groq API error: %s", exc)
+            raise exc
+
+    raise RuntimeError("Groq call exhausted retries without success or exception")
+
+
+async def _call_groq(system_prompt: str, user_message: str) -> tuple[str, int, int]:
+    """Async wrapper — runs the blocking Groq call in the default thread pool."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None, _call_groq_sync, system_prompt, user_message
+    )
+
+
+def _parse_tool_response(raw: str) -> tuple[str, dict, str]:
+    """
+    Parse JSON from Groq response.
+    Returns (tool_name, args_dict, reasoning).
+    Falls back to escalate_to_human on parse failure.
+    """
+    try:
+        data = json.loads(raw)
+        tool_name = str(data.get("tool", "")).strip()
+        args = data.get("args", {})
+        reasoning = str(data.get("reasoning", ""))
+        if tool_name not in ALLOWED_TOOLS:
+            logger.warning("Agent returned unknown tool '%s', escalating.", tool_name)
+            return "escalate_to_human", {"reason": f"Unknown tool: {tool_name}"}, reasoning
+        if not isinstance(args, dict):
+            args = {}
+        return tool_name, args, reasoning
+    except (json.JSONDecodeError, TypeError, AttributeError) as exc:
+        logger.warning("Failed to parse Groq JSON: %s | raw=%s", exc, raw[:200])
+        return "escalate_to_human", {"reason": "Agent JSON parse error"}, raw[:200]
 
 
 async def run_agent(
@@ -301,58 +361,33 @@ async def run_agent(
     Returns the AgentAction record created.
     """
     policies = await _load_policies(session, merchant.id)
+    system_prompt = _build_system_prompt(merchant, policies)
 
-    # Build context for Claude
-    user_message = f"""
-RISK CASE:
-  ID:             {risk_case.id}
-  Source type:    {risk_case.source_type}
-  Source ID:      {risk_case.source_id}
-  Diagnosis:      {risk_case.diagnosis_code} (confidence {risk_case.diagnosis_confidence or 0:.0%})
-  Status:         {risk_case.status}
+    user_message = f"""RISK CASE:
+  ID:              {risk_case.id}
+  Source type:     {risk_case.source_type}
+  Source ID:       {risk_case.source_id}
+  Diagnosis:       {risk_case.diagnosis_code} (confidence {risk_case.diagnosis_confidence or 0:.0%})
+  Status:          {risk_case.status}
   Attempts so far: {risk_case.attempts_count}
-  Created:        {risk_case.created_at.isoformat()}
+  Created:         {risk_case.created_at.isoformat()}
 
 CUSTOMER:
-  ID:     {customer.id if customer else 'unknown'}
-  Name:   {customer.name if customer else 'unknown'}
-  Email:  {customer.email if customer else 'unknown'}
-  Phone:  {customer.phone if customer else 'unknown'}
+  ID:    {customer.id if customer else 'unknown'}
+  Name:  {customer.name if customer else 'unknown'}
+  Email: {customer.email if customer else 'unknown'}
+  Phone: {customer.phone if customer else 'unknown'}
 
-Choose ONE action to take now. Provide a one-sentence reasoning_summary.
-""".strip()
+Choose ONE action. Respond with ONLY the JSON object described in the system prompt."""
 
-    # Call Claude
-    response = _anthropic.messages.create(
-        model=MODEL,
-        max_tokens=1024,
-        system=_build_system_prompt(merchant, policies),
-        tools=TOOL_DEFINITIONS,
-        messages=[{"role": "user", "content": user_message}],
-        tool_choice={"type": "any"},  # force a tool call
+    raw_text, input_tokens, output_tokens = await _call_groq(system_prompt, user_message)
+    await _update_usage(session, merchant.id, input_tokens=input_tokens, output_tokens=output_tokens)
+
+    tool_name, tool_input, reasoning = _parse_tool_response(raw_text)
+    logger.info(
+        "Agent chose tool=%s for case=%s | reasoning=%.120s",
+        tool_name, risk_case.id, reasoning,
     )
-
-    await _update_usage(
-        session, merchant.id,
-        input_tokens=response.usage.input_tokens,
-        output_tokens=response.usage.output_tokens,
-    )
-
-    # Extract tool call
-    tool_use_block = next(
-        (b for b in response.content if b.type == "tool_use"), None
-    )
-    if not tool_use_block:
-        logger.warning("Agent returned no tool_use block for case %s", risk_case.id)
-        tool_name = "escalate_to_human"
-        tool_input = {"reason": "Agent returned no tool call"}
-        reasoning = "No tool_use block in response"
-    else:
-        tool_name = tool_use_block.name
-        tool_input = tool_use_block.input
-        # Extract text reasoning if present
-        text_block = next((b for b in response.content if b.type == "text"), None)
-        reasoning = text_block.text[:500] if text_block else f"Tool: {tool_name}"
 
     # Create AgentAction record (pending)
     action = AgentAction(
@@ -376,14 +411,12 @@ Choose ONE action to take now. Provide a one-sentence reasoning_summary.
     action.status = policy_result.action_status
 
     if not policy_result.allowed:
-        # Force escalate_to_human and log
         await append_audit(
             session, merchant.id, actor="policy_engine",
             action=f"action.denied.{policy_result.action_status}",
             target_id=str(action.id),
             detail=policy_result.reason,
         )
-        # If the block is an escalation, mark the case escalated
         if policy_result.action_status == "escalated":
             risk_case.status = "escalated"
         return action

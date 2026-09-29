@@ -33,7 +33,7 @@ async def list_policies(
     session: AsyncSession = Depends(get_db),
 ):
     await session.execute(
-        text("SET LOCAL app.current_merchant_id = :mid"), {"mid": str(merchant_id)}
+        text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'")
     )
     result = await session.execute(
         select(Policy).where(Policy.merchant_id == merchant_id).order_by(Policy.key)
@@ -50,7 +50,7 @@ async def upsert_policy(
 ):
     """Create or update a policy value for the merchant."""
     await session.execute(
-        text("SET LOCAL app.current_merchant_id = :mid"), {"mid": str(merchant_id)}
+        text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'")
     )
     result = await session.execute(
         select(Policy).where(Policy.merchant_id == merchant_id, Policy.key == key)

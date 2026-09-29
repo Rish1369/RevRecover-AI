@@ -20,6 +20,7 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
     worker_prefetch_multiplier=1,
+    worker_concurrency=1,
     # Beat schedule: run attribution scan every N seconds
     beat_schedule={
         "attribution-scan": {

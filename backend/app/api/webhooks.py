@@ -40,7 +40,7 @@ async def receive_razorpay_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     x_razorpay_signature: str | None = Header(default=None),
-    session: AsyncSession = Depends(lambda: get_db()),
+    session: AsyncSession = Depends(get_db),
 ):
     """
     Receive and process a Razorpay webhook for a specific merchant.
@@ -79,8 +79,7 @@ async def receive_razorpay_webhook(
 
     # 5. Set RLS context and route
     await session.execute(
-        __import__("sqlalchemy").text("SET LOCAL app.current_merchant_id = :mid"),
-        {"mid": str(merchant_id)},
+        __import__("sqlalchemy").text(f"SET LOCAL app.current_merchant_id = '{merchant_id}'"),
     )
 
     risk_case = None
